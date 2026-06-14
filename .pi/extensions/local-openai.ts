@@ -9,7 +9,7 @@ export default async function (pi: ExtensionAPI) {
       id: "Qwen/Qwen3.6-27B",
       name: "Qwen/Qwen3.6-27B",
       reasoning: false,
-      input: ["text"],
+      input: ["text","image","video"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: 262144,
       maxTokens: 81920,

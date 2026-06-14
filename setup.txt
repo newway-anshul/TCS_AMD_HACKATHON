@@ -1,0 +1,29 @@
+TCS AMD Hackathon - Setup Instructions
+========================================
+
+1. Install Node.js 22.x
+------------------------
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+2. Install pi coding agent
+---------------------------
+curl -fsSL https://pi.dev/install.sh | sh
+
+3. Clone the repository
+------------------------
+cd shared
+git clone https://github.com/newway-anshul/TCS_AMD_HACKATHON.git
+cd TCS_AMD_HACKATHON
+
+4. Start the SGLang server (run in a SEPARATE terminal , make sure to not change port number otherwise change port number in TCS_AMD_HACKATHON/.pi/extension/local-openai.ts)
+---------------------------------------------------------
+SGLANG_USE_AITER=1 python -m sglang.launch_server \
+    --model-path Qwen/Qwen3.6-27B \
+    --port 8000 \
+    --tp-size 1 \
+    --mem-fraction-static 0.8 \
+    --context-length 262144 \
+    --reasoning-parser qwen3 \
+    --tool-call-parser qwen3_coder \
+    --attention-backend triton

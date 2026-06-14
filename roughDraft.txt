@@ -1,0 +1,2 @@
+This system i built on Pi Agent + Qwen/Qwen3.6-27B.
+Agent has full access to system and because of locally deployd ai all your data is not exposed to third party.

@@ -16,6 +16,9 @@ cd shared
 git clone https://github.com/newway-anshul/TCS_AMD_HACKATHON.git
 cd TCS_AMD_HACKATHON
 
+   Note: Web search MCP is already configured at .pi/mcp.json
+   (uses parallel-search via https://search.parallel.ai/mcp)
+
 4. Start the SGLang server (run in a SEPARATE terminal , make sure to not change port number otherwise change port number in TCS_AMD_HACKATHON/.pi/extension/local-openai.ts)
 ---------------------------------------------------------
 SGLANG_USE_AITER=1 python -m sglang.launch_server \

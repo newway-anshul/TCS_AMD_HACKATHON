@@ -1,24 +1,19 @@
 TCS AMD Hackathon - Setup Instructions
 ========================================
-
 1. Install Node.js 22.x
 ------------------------
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
-
 2. Install pi coding agent
 ---------------------------
 curl -fsSL https://pi.dev/install.sh | sh
-
 3. Clone the repository
 ------------------------
 cd shared
 git clone https://github.com/newway-anshul/TCS_AMD_HACKATHON.git
 cd TCS_AMD_HACKATHON
-
    Note: Web search MCP is already configured at .pi/mcp.json
    (uses parallel-search via https://search.parallel.ai/mcp)
-
 4. Start the SGLang server (run in a SEPARATE terminal , make sure to not change port number otherwise change port number in TCS_AMD_HACKATHON/.pi/extension/local-openai.ts)
 ---------------------------------------------------------
 SGLANG_USE_AITER=1 python -m sglang.launch_server \
@@ -30,3 +25,453 @@ SGLANG_USE_AITER=1 python -m sglang.launch_server \
     --reasoning-parser qwen3 \
     --tool-call-parser qwen3_coder \
     --attention-backend triton
+//pthon code 
+pywebview
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+main.pythonimport os
+import webview
+from server import PiAgent, PiAgentAPI
+def on_start():
+    print("WebView ready")
+    agent.start_readers()
+if __name__ == "__main__":
+    agent = PiAgent()
+    api = PiAgentAPI(agent)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    html_file = os.path.join(base_dir, "UI", "index3.html")
+    window = webview.create_window(
+        "Agent Ratna",
+        url="http://localhost:4200/",
+        js_api=api,
+        width=1200,
+        height=800
+    )
+    agent.set_window(window)
+    webview.start(on_start, debug=False)
+// agent code 
+import json
+import os
+import subprocess
+import threading
+from queue import Queue
+import webview
+class PiAgent:
+    def __init__(self):
+        self.window = None
+        self.events = Queue()
+        print("Starting Pi...")
+        self.process = subprocess.Popen(
+            [r"C:\Users\HP\AppData\Roaming\npm\pi.cmd", "--mode", "rpc"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            encoding="utf-8",        # add this
+            errors="replace" 
+        )
+        print(f"Pi PID: {self.process.pid}")
+    def set_window(self, window):
+        self.window = window
+    def start_readers(self):
+        threading.Thread(target=self.read_stdout, daemon=True).start()
+        threading.Thread(target=self.read_stderr, daemon=True).start()
+    def send_message(self, prompt):
+        try:
+            command = {"type": "prompt", "message": prompt}
+            payload = json.dumps(command)
+            print("Sending:", payload)
+            self.process.stdin.write(payload + "\n")
+            self.process.stdin.flush()
+            return {"success": True}
+        except BrokenPipeError:
+            print("Pi process pipe is broken")
+            return {"success": False, "error": "Pi process is not running"}
+        except Exception as e:
+            print(f"send_message error: {e}")
+            return {"success": False, "error": str(e)}
+    def get_events(self):
+        """Called from JavaScript. Returns all pending events."""
+        events = []
+        while not self.events.empty():
+            events.append(self.events.get())
+        return events
+    def read_stdout(self):
+        while True:
+            try:
+                line = self.process.stdout.readline()
+                if not line:
+                    print("Pi stdout closed")
+                    self.send_to_ui("status", "Pi process ended")
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                jsonLine = json.loads(line)
+                print("STDOUT:", jsonLine.get('type'))                
+                print("============")
+                self.send_to_ui("stdout", line)
+            except Exception as e:
+                print(f"read_stdout error: {e}")
+                break
+    def read_stderr(self):
+        while True:
+            try:
+                line = self.process.stderr.readline()
+                if not line:
+                    print("Pi stderr closed")
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                print("STDERR:", line)
+                print("============")
+                self.send_to_ui("stderr", line)
+            except Exception as e:
+                print(f"read_stderr error: {e}")
+                break
+    def send_to_ui(self, event_type, message):
+        jsonMessage = json.loads(message)
+        SESSION_COMMANDS = {'get_state', 'new_session', 'switch_session'}
+        if jsonMessage.get('command') in SESSION_COMMANDS:
+            # Fix: use json.dumps to safely serialize, no f-string interpolation
+            event = json.dumps({"type": event_type,"message": jsonMessage})
+            self.window.evaluate_js(f'onPiEvent({event})')
+        else:
+            if jsonMessage.get("type") == "agent_end":
+                self.events.put({"type": event_type, "message": message})
+    def send_to_ui3(self, event_type, message):
+        jsonMessage = json.loads(message)
+        print(jsonMessage)
+        if jsonMessage.get("type") == "agent_end":
+            self.events.put({
+                "type": event_type,
+                "message": message
+                })   
+    def send_to_ui2(self, event_type, message):
+        if self.window:
+            # Call a JS function directly
+            safe_message = json.dumps(message)  # escapes quotes/special chars safely
+            self.window.evaluate_js(f'onPiEvent("{"type": {event_type}, "message": {message}})')   
+    def choose_workspace(self):
+        result = self.window.create_file_dialog(
+            webview.FOLDER_DIALOG,
+            allow_multiple=False,
+            directory=os.path.expanduser("~")  # open at last location
+            )
+        if result and len(result) > 0:
+            #self.workspace = result[0]
+            #self.save_config({"workspace": self.workspace})  # 👈 persist it
+            return {"success": True, "path": result}
+        return {"success": False, "path": None} 
+    def get_currentsession(self):
+        try:
+            command = {"type": "get_state"}
+            payload = json.dumps(command)
+            print("Sending:", payload)
+            self.process.stdin.write(payload + "\n")
+            self.process.stdin.flush()
+            return {"success": True}
+        except BrokenPipeError:
+            print("Pi process pipe is broken")
+            return {"success": False, "error": "Pi process is not running"}
+        except Exception as e:
+            print(f"send_message error: {e}")
+    def start_new_session(self):
+        try:
+            command = {"type": "new_session"}
+            payload = json.dumps(command)
+            print("Sending:", payload)
+            self.process.stdin.write(payload + "\n")
+            self.process.stdin.flush()
+            return {"success": True}
+        except BrokenPipeError:
+            print("Pi process pipe is broken")
+            return {"success": False, "error": "Pi process is not running"}
+        except Exception as e:
+            print(f"send_message error: {e}")    
+    def switch_session(self,sessionFileUrl):
+        try:
+            command = {"type": "switch_session", "sessionPath": sessionFileUrl}
+            payload = json.dumps(command)
+            print("Sending:", payload)
+            self.process.stdin.write(payload + "\n")
+            self.process.stdin.flush()
+            return {"success": True}
+        except BrokenPipeError:
+            print("Pi process pipe is broken")
+            return {"success": False, "error": "Pi process is not running"}
+        except Exception as e:
+            print(f"send_message error: {e}")
+    def abort_agent(self):
+        try:
+            command = {"type": "abort"}
+            payload = json.dumps(command)
+            print("Sending:", payload)
+            self.process.stdin.write(payload + "\n")
+            self.process.stdin.flush()
+            self.events = Queue()
+            return {"success": True}
+        except BrokenPipeError:
+            print("Pi process pipe is broken")
+            return {"success": False, "error": "Pi process is not running"}
+        except Exception as e:
+            print(f"send_message error: {e}")
+            return {"success": False, "error": str(e)}            
+    def shutdown(self):
+        try:
+            if self.process:
+                print("Stopping Pi...")
+                self.process.terminate()
+        except Exception as e:
+            print("Shutdown error:", e)
+# FIX 4: Expose only safe methods to JS frontend
+class PiAgentAPI:
+    def __init__(self, agent: PiAgent):
+        self._agent = agent
+    def send_message(self, prompt):
+        return self._agent.send_message(prompt)
+    def abort_task(self):
+        return self._agent.abort_agent()
+    def get_events(self):
+        return self._agent.get_events()
+    def choose_workspace(self):
+        return self._agent.choose_workspace()
+    def get_currentsession(self):
+        return self._agent.get_currentsession()
+    def switch_session(self,sessionFileUrl):
+        return self._agent.switch_session(sessionFileUrl)
+    def start_new_session(self):
+        return self._agent.start_new_session()
+// Angular app.ts
+import { DatePipe, JsonPipe } from '@angular/common';
+import { ChangeDetectorRef, Component, NgZone, OnDestroy, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { MarkdownComponent } from 'ngx-markdown';
+import { filter, Subscription } from 'rxjs';
+import { v4 as uuidV4 } from 'uuid';
+import { LucidIcons } from './icons';
+import { AgentSession, Message, UICurrentSession } from './model';
+import { PiEvent, PiEventsService } from './pi-events.service';
+@Component({
+  selector: 'app-root',
+  imports: [...LucidIcons, FormsModule, MarkdownComponent, DatePipe, JsonPipe],
+  templateUrl: './app.html',
+  styleUrl: './app.scss',
+})
+export class App implements OnDestroy {
+  protected readonly title = signal('agent-ui');
+  isSideBarCollapsed = true;
+  assistantMessages: Array<PiEvent> = [];
+  userMessages: string[] = [];
+  currentMessage = '';
+  messages: Message[] = [];
+  isAgentTrunCompleted = true;
+  sub: Subscription | undefined;
+  timerID: number;
+  finalMessage = '';
+  sessions: AgentSession[] = [];
+  currentActiveSession: UICurrentSession | undefined;
+  constructor(
+    private piEvents: PiEventsService,
+    private ngZone: NgZone,
+    private cdr: ChangeDetectorRef,
+  ) {
+    this.pollBackendEvents();
+  }
+  ngOnInit() {
+    this.sub = this.piEvents.events$.subscribe((event) => {
+      if (event.type === 'stdout') {
+        // this.assistantMessages.push(event);
+      }
+    });
+  }
+  toggleSideBar() {
+    this.isSideBarCollapsed = !this.isSideBarCollapsed;
+  }
+  async getActiveSessionInfo() {
+    try {
+      const sessionId = await new Promise<string>((resolve, reject) => {
+        const sub = this.piEvents.events$
+          .pipe(filter((e) => e.message?.command === 'get_state'))
+          .subscribe({
+            next: (data) => {
+              resolve(data?.message.data.sessionFile);
+              sub.unsubscribe();
+            },
+            error: (err) => reject(err),
+          });
+        window.pywebview.api.get_currentsession().catch(reject); // trigger the event, reject if it fails
+      });
+      console.log('session id is', sessionId);
+      return sessionId;
+    } catch (error) {
+      console.error('unable to get session info', error);
+      return Promise.resolve(undefined);
+    }
+  }
+  async observeNewSessionEvent(workspace: any, newSession: any): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const sub = this.piEvents.events$
+        .pipe(filter((e) => e.message?.command === 'new_session'))
+        .subscribe({
+          next: (data) => {
+            console.log(data);
+            this.ngZone.runTask(async () => {
+              if (workspace?.success && !!workspace?.path && newSession.success) {
+                this.addToAgentSession({
+                  title: '',
+                  messages: [],
+                  workspace: workspace.path[0],
+                });
+                resolve(true);
+              } else {
+                resolve(false);
+              }
+              this.cdr.detectChanges();
+            });
+            sub.unsubscribe();
+          },
+          error: () => {
+            resolve(false);
+            sub.unsubscribe();
+          },
+        });
+    });
+  }
+  async startNewSession() {
+    try {
+      const workSpace = await window.pywebview.api.choose_workspace(); // {"success": True, "path": result}
+      const newSession = await window.pywebview.api.start_new_session();
+      const backenOk = await this.observeNewSessionEvent(workSpace, newSession);
+      return true;
+    } catch (error) {
+      console.error(`unable to lauch session `, error);
+      return false;
+    }
+  }
+  addToAgentSession(sesion: Partial<AgentSession>) {
+    const id = uuidV4();
+    const newSessionData = {
+      id: id,
+      title: 'New Conversation',
+      workspace: sesion.workspace || '',
+      messages: [],
+      agentSessionPath: sesion.agentSessionPath || '',
+    };
+    this.currentActiveSession = {
+      id: id,
+      title: newSessionData.title,
+      workspace: newSessionData.workspace,
+    };
+    this.messages = [];
+    this.sessions.push(newSessionData);
+  }
+  addNewMessageToActiveSession(message) {
+    for (const s of this.sessions) {
+      if (s.id === this.currentActiveSession?.id) {
+        s.messages.push(message);
+        this.messages.push(message);
+        break;
+      }
+    }
+  }
+  async pollBackendEvents() {
+    try {
+      clearTimeout(this.timerID);
+      const events = (await window.pywebview.api.get_events()) as PiEvent[];
+      for (const event of events) {
+        console.log(event);
+        event.message = JSON.parse(event.message) || {};
+        const finalMessage = event.message?.messages?.filter((m) => m.role === 'assistant');
+        if (finalMessage) {
+          this.ngZone.runTask(() => {
+            this.finalMessage = finalMessage[finalMessage.length - 1]?.content[1]?.text;
+            const newMessage = {
+              type: 'Agent',
+              message: this.finalMessage,
+              timestamp: finalMessage[finalMessage.length - 1]?.timestamp,
+            };
+            this.addNewMessageToActiveSession(newMessage);
+            this.isAgentTrunCompleted = true;
+            this.cdr.detectChanges();
+          });
+        }
+        //this.assistantMessages.push(event as any);
+        //this.cdr.detectChanges()
+      }
+    } catch (err) {
+      console.error('Polling error:', err);
+    }
+    this.timerID = setTimeout(() => {
+      this.pollBackendEvents();
+    }, 100);
+  }
+  async sendPrompt(e: Event) {
+    e.preventDefault();
+    if (!this.currentMessage.trim()) {
+      return;
+    }
+    //addLine("USER > " + prompt);
+    try {
+      this.userMessages.push(this.currentMessage);
+      this.addNewMessageToActiveSession({
+        type: 'User',
+        message: this.currentMessage,
+        timestamp: Date.now(),
+      });
+      this.isAgentTrunCompleted = false;
+      await window.pywebview.api.send_message(this.currentMessage);
+      this.ngZone.run(() => {
+        this.currentMessage = '';
+        this.cdr.detectChanges();
+      });
+    } catch (err) {
+      console.error('send message error', err);
+    }
+  }
+  async abortLastMessage() {
+    const response = await window.pywebview.api.abort_task();
+    return response;
+  }
+  async reStart() {
+    try {
+      const response = await this.abortLastMessage();
+      window.location.reload();
+    } catch (error) {
+      console.error('restart error', error);
+    }
+  }
+  async startNewChat() {
+    try {
+      if (!this.currentActiveSession) return;
+      this.currentActiveSession = undefined;
+      this.messages = [];
+      this.cdr.detectChanges();
+      await this.startNewSession();
+      //now listen for workspace selection
+    } catch (error) {
+      console.error(`error while starting new chat `, error);
+    }
+  }
+  async changeSession(session: AgentSession) {
+    try {
+      if (this.currentActiveSession?.id === session.id) {
+        return;
+      }
+      //const preSessionUrl = await this.getActiveSessionInfo();
+      //alert('got session url ' + preSessionUrl);
+      this.currentActiveSession = {
+        id: session.id,
+        title: session.title,
+        workspace: session.workspace,
+      };
+      this.messages = this.sessions.filter((s) => s.id == session.id)[0]?.messages || [];
+    } catch (error) {
+      console.error(`error while changin session `, error);
+    }
+  }
+  ngOnDestroy(): void {
+    this.sub?.unsubscribe();
+  }
+}
